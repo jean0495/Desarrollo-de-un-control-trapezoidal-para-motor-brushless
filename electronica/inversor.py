@@ -1,64 +1,72 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Fri Jul 17 17:03:53 2026
-
-@author: lmintegral
-"""
-
-"""
-Módulo de Electrónica de Potencia: Inversor Trifásico de 6 pulsos
-"""
+import numpy as np
 
 class Inversor:
-    def __init__(self, Vdc=48.0):
+    """
+    Clase que representa un Inversor Trifásico de 6 pulsos con
+    generación de tiempo muerto (Dead Time) por software.
+    """
+    def __init__(self, dt_sim: float, dead_time: float = 1e-6):
         """
-        :param Vdc: Voltaje del bus DC de entrada [Voltios]
+        Parameters
+        ----------
+        dt_sim : float
+            Paso de tiempo de la simulación o ciclo de ejecución (segundos).
+        dead_time : float
+            Tiempo muerto deseado entre conmutaciones (segundos).
         """
-        self.Vdc = float(Vdc)
+        self.dt_sim = dt_sim
+        self.dead_time = dead_time
         
-    def calcular_voltaje_brazo(self, Sh, Sl, i_fase, e_fase):
-        """
-        Calcula el voltaje de una pierna del inversor respecto a tierra (GND).
+        # Cantidad de pasos de simulación que dura el tiempo muerto
+        self.dead_time_ticks = int(np.ceil(dead_time / dt_sim)) if dt_sim > 0 else 0
         
-        :param Sh: Estado de la compuerta superior (1 = ON, 0 = OFF)
-        :param Sl: Estado de la compuerta inferior (1 = ON, 0 = OFF)
-        :param i_fase: Corriente actual de la fase (para los diodos)
-        :param e_fase: Fuerza electromotriz actual (para fase flotante)
-        """
-        if Sh == 1 and Sl == 0:
-            # Interruptor superior cerrado, inferior abierto
-            return self.Vdc
-            
-        elif Sh == 0 and Sl == 1:
-            # Interruptor inferior cerrado, superior abierto
-            return 0.0
-            
-        else:
-            # Ambos interruptores abiertos (Fase inactiva o Tiempo Muerto)
-            # La inductancia del motor fuerza a la corriente a pasar por los diodos
-            tolerancia_cero = 0.001 # Amperios
-            
-            if i_fase > tolerancia_cero:
-                # La corriente sale hacia el motor: conduce el diodo inferior
-                return 0.0
-            elif i_fase < -tolerancia_cero:
-                # La corriente regresa del motor: conduce el diodo superior
-                return self.Vdc
-            else:
-                # Corriente cero (Fase verdaderamente flotante).
-                # El voltaje medido en la terminal es la mitad del bus más su propia FEM
-                return (self.Vdc / 2.0) + e_fase
+        # Estado interno de las 3 ramas del inversor (A, B, C)
+        self.fases = {
+            'A': {'prev_cmd': 0, 'counter': self.dead_time_ticks, 'out_high': 0, 'out_low': 0},
+            'B': {'prev_cmd': 0, 'counter': self.dead_time_ticks, 'out_high': 0, 'out_low': 0},
+            'C': {'prev_cmd': 0, 'counter': self.dead_time_ticks, 'out_high': 0, 'out_low': 0},
+        }
 
-    def obtener_voltajes_fase(self, pulsos, ia, ib, ic, ea, eb, ec):
+    def _procesar_rama(self, nombre_fase: str, cmd_deseado: int):
+        """Procesa la lógica de retardo para una única rama."""
+        fase = self.fases[nombre_fase]
+
+        # 1. Detección de flanco (cambio de estado): Apagado inmediato de ambos MOSFETs
+        if cmd_deseado != fase['prev_cmd']:
+            fase['counter'] = 0
+            fase['out_high'] = 0
+            fase['out_low'] = 0
+            fase['prev_cmd'] = cmd_deseado
+            return
+
+        # 2. Ventana de Tiempo Muerto activa: Mantener ambos apagados
+        if fase['counter'] < self.dead_time_ticks:
+            fase['counter'] += 1
+            fase['out_high'] = 0
+            fase['out_low'] = 0
+        # 3. Retardo finalizado: Encendido seguro de la salida correspondiente
+        else:
+            if cmd_deseado == 1:
+                fase['out_high'] = 1
+                fase['out_low'] = 0
+            else:
+                fase['out_high'] = 0
+                fase['out_low'] = 1
+
+    def actualizar(self, cmd_A: int, cmd_B: int, cmd_C: int):
         """
-        Convierte los 6 pulsos de control en los 3 voltajes aplicados al motor.
-        
-        :param pulsos: Tupla o lista de 6 estados (Sah, Sal, Sbh, Sbl, Sch, Scl)
+        Procesa los 3 comandos de entrada y retorna las 6 salidas digitales.
+
+        Returns
+        -------
+        tuple: (A_high, A_low, B_high, B_low, C_high, C_low)
         """
-        Sah, Sal, Sbh, Sbl, Sch, Scl = pulsos
-        
-        Va = self.calcular_voltaje_brazo(Sah, Sal, ia, ea)
-        Vb = self.calcular_voltaje_brazo(Sbh, Sbl, ib, eb)
-        Vc = self.calcular_voltaje_brazo(Sch, Scl, ic, ec)
-        
-        return Va, Vb, Vc
+        self._procesar_rama('A', int(cmd_A))
+        self._procesar_rama('B', int(cmd_B))
+        self._procesar_rama('C', int(cmd_C))
+
+        return (
+            self.fases['A']['out_high'], self.fases['A']['out_low'],
+            self.fases['B']['out_high'], self.fases['B']['out_low'],
+            self.fases['C']['out_high'], self.fases['C']['out_low']
+        )
