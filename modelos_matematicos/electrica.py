@@ -38,6 +38,22 @@ def actualizar_corrientes(ia, ib, ic, Va, Vb, Vc, ea, eb, ec, R, L, Ts):
     
     return ia_nueva, ib_nueva, ic_nueva 
 
+def actualizar_corriente_2fases(I_pos, V_pos, V_neg, e_pos, e_neg, R, L, Ts):
+    """
+    Resuelve la dinámica de corriente para el modo de conducción de 2 fases,
+    propio del control trapezoidal de 6 pasos: la tercera fase está en
+    circuito abierto real (icorriente = 0), no atada a ningún voltaje.
+
+    Dado que ia = -ib (KCL, sin cable neutro, fase inactiva con corriente 0),
+    el circuito se reduce a un lazo RL simple entre las dos fases activas.
+
+    :param I_pos: corriente actual en la fase que conduce en sentido positivo [A]
+    :return: nueva corriente de la fase positiva (la negativa es su opuesto)
+    """
+    dI_dt = ((V_pos - V_neg) - 2.0 * R * I_pos - (e_pos - e_neg)) / (2.0 * L)
+    return I_pos + Ts * dI_dt
+
+
 def perfil_trapezoidal(theta_e):
     """
     Genera el valor normalizado (-1 a 1) de la forma de onda trapezoidal 

@@ -70,3 +70,28 @@ class Inversor:
             self.fases['B']['out_high'], self.fases['B']['out_low'],
             self.fases['C']['out_high'], self.fases['C']['out_low']
         )
+
+    def voltajes_de_fase(self, Vdc: float):
+        """
+        Convierte el estado actual de las 6 compuertas en los voltajes de
+        fase (referenciados al riel negativo del bus DC) que necesita el
+        modelo de planta (MotorBLDC.actualizar).
+
+        Simplificación asumida: si una rama no está siendo forzada por el
+        controlador de corriente (ninguno de los dos MOSFETs de esa rama
+        encendido, es decir la fase "no conmutada" del control trapezoidal),
+        se trata como si el lado bajo estuviera activo (fase atada a 0V).
+        Esta es la aproximación estándar usada en modelos simplificados de
+        6 pasos; no reproduce el "floating" ideal de la fase inactiva, pero
+        es suficiente para validar el comportamiento del controlador.
+        """
+        def _voltaje_rama(fase):
+            if self.fases[fase]['out_high']:
+                return float(Vdc)
+            # out_low activo, o rama sin forzar (dead-time / no conmutada)
+            return 0.0
+
+        Va = _voltaje_rama('A')
+        Vb = _voltaje_rama('B')
+        Vc = _voltaje_rama('C')
+        return Va, Vb, Vc
