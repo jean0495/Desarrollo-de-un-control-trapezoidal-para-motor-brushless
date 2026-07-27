@@ -50,21 +50,22 @@ DT_PLANT = 2e-6          # Paso de integración de la planta [s]
 TIEMPO_SIM = 10           # Duración total de la simulación [s]
 T_CARGA = 0.0            # Par de carga aplicado [N*m]
 
-TAU_FILTRO_REF = 0.05    # Constante de tiempo del Filtro Pasa Bajas [s] (Ajustable)
+TAU_FILTRO_REF = 0.05    # Constante de tiempo del Filtro Pasa Bajas [s] 
 
-
+#Función para la referencia
 def omega_ref_perfil(t):
     """Referencia de velocidad cruda (escalón de 0 a 5 rad/s en t=0.05s)."""
     return 0.0 if t < 0.05 else 5.0
 
 
 def main():
+    #Se instacnia el objeto motor, junto con sus parametros
     motor = MotorBLDC(R, L, J, B, P, DT_PLANT, LAMBDA_M)
-    inversor = Inversor(dt_sim=TS_CURRENT, dead_time=DEAD_TIME)
-    ctrl_corriente = ControladorCorriente(TS_CURRENT, BANDA_HISTERESIS)
+    inversor = Inversor(dt_sim=TS_CURRENT, dead_time=DEAD_TIME) #Se instancia el objeto del inversor
+    ctrl_corriente = ControladorCorriente(TS_CURRENT, BANDA_HISTERESIS) #Objeto de corriente
     ctrl_velocidad = ControladorVelocidad(
         TS_VEL, KP_VEL, KI_VEL, TE_MIN, TE_MAX, P, LAMBDA_M
-    )
+    ) #Objeto de velocidad
 
     n_steps = int(TIEMPO_SIM / DT_PLANT)
     k_current = max(1, round(TS_CURRENT / DT_PLANT))
