@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Clase Base para los controladores del sistema
+Clase Base para los controladores del sistema "Controlador"
 """
 
 class Controlador:
