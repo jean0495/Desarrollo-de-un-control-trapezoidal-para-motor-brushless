@@ -21,7 +21,7 @@ from electronica.inversor import Inversor
 # SELECCIÓN DE CONTROLADOR DE CORRIENTE
 # ============================================================
 # Opciones: "HISTERESIS" o "PWM"
-CONTROLADOR_CORRIENTE = "HISTERESIS"
+CONTROLADOR_CORRIENTE = "PWM"
 
 # ============================================================
 # PARÁMETROS DEL MOTOR
@@ -68,8 +68,7 @@ DEAD_TIME = 1e-6          # s
 # ============================================================
 T_INICIO_RAMPA = 2.0      # Tiempo en que inicia la rampa [s]
 T_DURACION_RAMPA = 1.0    # Tiempo que tarda en alcanzar la velocidad objetivo [s]
-OMEGA_TARGET = 5.0        # Velocidad final objetivo [rad/s]
-
+OMEGA_TARGET = 5.0
 MODO_CONDICION_INICIAL = "DOS_FASES"
 
 # ============================================================
@@ -84,7 +83,7 @@ TAU_FILTRO_REF = 0.05    # Constante de tiempo del Filtro Pasa Bajas [s]
 
 def crear_controlador_corriente():
     """
-    Importante: instancia el controlador de corriente según CONTROLADOR_CORRIENTE.
+    Instancia el controlador de corriente según CONTROLADOR_CORRIENTE.
     Ambas clases comparten la misma interfaz (.Ts y .calcular(...)),
     así que el resto del programa no necesita saber cuál está activo.
     """
@@ -125,7 +124,7 @@ def main():
     )
 
     n_steps = int(TIEMPO_SIM / DT_PLANT)
-    # k_current ahora se deriva del Ts propio del controlador activo,
+    # k_current se deriva del Ts propio del controlador activo,
     # así que funciona igual sin importar cuál esté seleccionado
     k_current = max(1, round(ctrl_corriente.Ts / DT_PLANT))
     k_speed = max(1, round(TS_VEL / DT_PLANT))
@@ -147,8 +146,8 @@ def main():
     hist_Te = np.zeros(n_steps)
     hist_wref = np.zeros(n_steps)
     hist_Iref = np.zeros(n_steps)
-    hist_Ah = np.zeros(n_steps)
-    hist_Al = np.zeros(n_steps)
+    hist_Ch = np.zeros(n_steps)
+    hist_Cl = np.zeros(n_steps)
     hist_Bh = np.zeros(n_steps)
     hist_Bl = np.zeros(n_steps)
 
@@ -161,7 +160,7 @@ def main():
         if k % k_speed == 0:
             I_ref = ctrl_velocidad.calcular(wref_filtrada, motor.omega_m)
 
-        if k % k_current == 0:
+        if k % k_current == 0:  # Debo cambiar esto, poner otra lógica que me ayude a disminuir los picos de corriente
             if t < T_INICIO_RAMPA:
                 if MODO_CONDICION_INICIAL == "DOS_FASES":
                     cmd_A = 0; cmd_B = 0; cmd_C = 0
@@ -192,8 +191,8 @@ def main():
         hist_Te[k] = motor.Te
         hist_wref[k] = wref_filtrada
         hist_Iref[k] = I_ref
-        hist_Ah[k] = Ah
-        hist_Al[k] = Al
+        hist_Ch[k] = Ch
+        hist_Cl[k] = Cl
         hist_Bh[k] = Bh
         hist_Bl[k] = Bl
 
@@ -232,12 +231,27 @@ def main():
     axs[2].legend(loc="upper right")
     axs[2].grid(True)
 
-    ZOOM_START = 0.10
-    ZOOM_DURACION = 30 * ctrl_corriente.Ts
+    # ------------------------------------------------------------
+    # Ventana de zoom para señales de compuerta:
+    # - PWM: se dimensiona con el PERIODO REAL de conmutación (Ts_pwm),
+    #   no con el Ts de invocación (que en PWM es DT_PLANT, la resolución
+    #   de la portadora). Usar DT_PLANT aquí daría una ventana más corta
+    #   que un solo ciclo de PWM y no se vería el patrón real.
+    # - Histéresis: se sigue usando su Ts de evaluación, como antes.
+    # ------------------------------------------------------------
+    if CONTROLADOR_CORRIENTE == "PWM":
+        periodo_conmutacion = ctrl_corriente.Ts_pwm
+        N_CICLOS_ZOOM = 10   # cuántos periodos de PWM completos mostrar
+    else:
+        periodo_conmutacion = ctrl_corriente.Ts
+        N_CICLOS_ZOOM = 30  # histéresis: mantiene el criterio original
+
+    ZOOM_START = T_INICIO_RAMPA + 0.5
+    ZOOM_DURACION = N_CICLOS_ZOOM * periodo_conmutacion
     zoom_mask = (hist_t >= ZOOM_START) & (hist_t < ZOOM_START + ZOOM_DURACION)
 
-    axs[3].step(hist_t[zoom_mask], hist_Ah[zoom_mask], where="post", label="A_high")
-    axs[3].step(hist_t[zoom_mask], hist_Al[zoom_mask], where="post", label="A_low")
+    axs[3].step(hist_t[zoom_mask], hist_Ch[zoom_mask], where="post", label="C_high")
+    axs[3].step(hist_t[zoom_mask], hist_Cl[zoom_mask], where="post", label="C_low")
     axs[3].step(hist_t[zoom_mask], hist_Bh[zoom_mask] + 2.2, where="post", label="B_high (+2.2 offset)")
     axs[3].step(hist_t[zoom_mask], hist_Bl[zoom_mask] + 2.2, where="post", label="B_low (+2.2 offset)")
     axs[3].set_ylabel("Compuertas (0/1)")
@@ -254,6 +268,32 @@ def main():
     print(f"Gráfica guardada en: {out_path}")
     print(f"Controlador de corriente: {CONTROLADOR_CORRIENTE}")
     print(f"Velocidad final: {hist_omega[-1]:.2f} rad/s (referencia: {hist_wref[-1]:.2f} rad/s)")
+
+    # ---------------- Medidor por Clics ----------------
+    # Haz clic en 2 puntos de la gráfica (por ejemplo, dos flancos
+    # de subida consecutivos de A_high) para medir Δt directamente
+    # y confirmar que el periodo/frecuencia real coincide con FREQ_PWM.
+    puntos_t = []
+
+    def medir_tiempo(event):
+        if event.xdata is not None and event.button == 1:
+            puntos_t.append(event.xdata)
+            print(f"📍 Clic {len(puntos_t)}: t = {event.xdata:.7f} s ({event.xdata * 1e6:.1f} µs)")
+
+            if len(puntos_t) == 2:
+                t1, t2 = puntos_t[0], puntos_t[1]
+                dt = abs(t2 - t1)
+                frecuencia_khz = (1 / dt) / 1000 if dt > 0 else 0
+
+                print("=" * 45)
+                print("MEDICIÓN DE TIEMPO (Δt):")
+                print(f"   • Δt = {dt * 1e6:.2f} µs  ({dt * 1e3:.4f} ms)")
+                print(f"   • Frecuencia (1/Δt) = {frecuencia_khz:.2f} kHz")
+                print("=" * 45 + "\n")
+
+                puntos_t.clear()
+
+    fig.canvas.mpl_connect('button_press_event', medir_tiempo)
 
     plt.show(block=False)
 
